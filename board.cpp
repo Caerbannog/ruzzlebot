@@ -28,7 +28,7 @@ const int Board::valueLUT[] = { 1, // A
                                 1, // U
                                 5, // V
                                 10, // W
-                                10, // X ?
+                                10, // X
                                 10, // Y
                                 10 // Z ?
                               };
