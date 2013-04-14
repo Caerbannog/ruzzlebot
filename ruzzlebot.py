@@ -1,106 +1,116 @@
 #!/usr/bin/env monkeyrunner
 
+# Install jython
+# Make sure the "tools" folder from your Android SDK is in the PATH
+
+
+import re
 from com.android.monkeyrunner import MonkeyRunner, MonkeyDevice
-from collections import defaultdict
+from com.android.monkeyrunner.MonkeyDevice import *
 
 
-def build_dict():
-	root = tree()
-	
-	f = open('dict.txt', 'r')
-	for word in f:
-		word = word.strip()
-		if len(word) > 0:
-			insert_word(root, word)
-	f.close()
-	
-	return root
-
-
-def tree():
-	return defaultdict(tree)
-
-
-def insert_word(branch, word):
-	if not word:
-		branch['valid'] = True
-	else:
-		insert_word(branch[word[0]], word[1:])
+SCORES = { 'A':  1, 'B':  3, 'C':  3, 'D':  2, 'E':  1, 'F':  4, 'G':  2,
+           'H':  4, 'I':  1, 'J':  8, 'K': 10, 'L':  2, 'M':  2, 'N':  1,
+           'O':  1, 'P':  3, 'Q':  8, 'R':  1, 'S':  1, 'T':  1, 'U':  1,
+           'V':  5, 'W': 10, 'X': 10, 'Y': 10, 'Z': 10  };
 
 
 def get_board():
-	str = MonkeyRunner.input('What are the letters?', 'XXXX XXXX XXXX XXXX').lower()
+	line = MonkeyRunner.input('What are the letters?', 'ABCD EFGH IJKL MNOP').upper()
+	clean = re.findall('[A-Z]', line)
 	
-	board = [[''] * 4 for i in range(4)]
-	i = 0
-	j = 0
-	for letter in str:
-		if letter.isalpha():
-			board[i][j] = letter
-			i += 1
-			if i >= 4:
-				i = 0
-				j += 1
-	
-	if i <> 0 or j <> 4:
-		print("Wrong number of letters!") # TODO fail
-	
-	return board
+	return [[clean[i + j * 4] for i in range(4)] for j in range(4)]
 
 
-class solution:
-	path = []
-	score = 0
-	word = ''
-
-
-def search_branch(board, solutions, branch, i, j, partial_word = '', partial_path = [], partial_score = 0, partial_multiplier = 1):
+def explore(board, input_f, index, i, j, current_path, paths):
 	if i < 0 or i >= 4 or j < 0 or j >= 4:
 		return
-
-	if (i, j) in partial_path:
+	
+	if (i, j) in current_path:
 		return
 	
-	branch = branch[board[i][j]]
-	if not branch:
-		return
+	letter = board[i][j]
+	
+	# Try to find a sibling with this letter.
+	while True:
+		if input_f[index * 4] == letter:
+			current_path = list(current_path) # cloning
+			current_path.append( (i, j) )
+			
+			if ord(input_f[index * 4 + 1]) & 0x10: # This node is a valid word.
+				paths.append(current_path)
+			
+			child_index = (ord(input_f[index * 4 + 1]) & 0x0F) * 256 * 256 \
+			             + ord(input_f[index * 4 + 2]) * 256 \
+			             + ord(input_f[index * 4 + 3])
+			
+			if child_index <> 0:
+				for a in [-1, 0, 1]:
+					for b in [-1, 0, 1]:
+						explore(board, input_f, child_index, i + a, j + b, current_path, paths)
+			break
+		
+		if ord(input_f[index * 4 + 1]) & 0x20:
+			break # This node does not have any more sibling.
+		
+		index += 1
 
-	partial_word += board[i][j]
-	partial_path = list(partial_path) # clone it
-	partial_path.append( (i, j) )
-	partial_score += 1; # TODO
-	partial_multiplier *= 1; # TODO
 
-	if branch['valid']:
-		s = solution()
-		s.word = partial_word
-		s.path = partial_path
-		s.score = partial_score * partial_multiplier # TODO    bonus = (word.length() - 4 ) * 5; // Bonus de longueur.
-		solutions.append(s)
-
-	for a in [-1, 0, 1]:
-		for b in [-1, 0, 1]:
-			search_branch(board, solutions, branch, i + a, j + b, partial_word, partial_path, partial_score, partial_multiplier)
+class Solution:
+	pass
 
 
 def main():
+	print("Reading dictionary...")
+	f = open('fr.jet', 'r')
+	input_f = f.read()
+	input_f = input_f[8:]
+	f.close()
+	
+	print("Getting board...")
 	board = get_board()
 	
-	root = build_dict()
-	solutions = []
+	print("Searching...")
+	paths = []
 	for i in range(4):
 		for j in range(4):
-			search_branch(board, solutions, root, i, j)
+			explore(board, input_f, 1, i, j, [], paths)
 	
-	for s in solutions:
-		print(s.word)
+	print("Connecting...")
+	device = MonkeyRunner.waitForConnection()
+	# TODO print" package:%s" % device.getProperty('am.current.package')
 	
-#	device = MonkeyRunner.waitForConnection()
 #	pic = device.takeSnapshot()
 #	pic.writeToFile('screenshot.png','png')
+	
+	print("Sorting...")
+	solutions = []
+	for path in paths:
+		solution = Solution()
+		solution.path = path
+		solution.word = ''.join([board[i][j] for (i,j) in path])
+		solution.score = len(solution.word) #TODO
+		solutions.append(solution)
+	solutions = sorted(solutions, key=lambda sol: -sol.score)
+	
+	print("Playing...")
+	width = device.getProperty('display.width')
+	height = device.getProperty('display.height')
+	words = set()
+	for solution in solutions:
+		if solution.word in words:
+			continue # Skip duplicates.
+		
+		words.add(solution.word)
+		print(solution.word)
+		
+		for (i, j) in solution.path:
+			x = 50 + i * 50
+			y = 200 + j * 50
+			device.touch(x, y, DOWN)
+			MonkeyRunner.sleep(.5)
+		device.touch(x, y, UP) # TODO drag?
 
 
 if __name__ == '__main__':
     main()
-
-# ABCD EFGH IJKL MNOP
