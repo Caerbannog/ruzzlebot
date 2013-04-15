@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 # Use this script to extract a text dictionary from .dex binary file.
+# You need numpy installed.
 
 # To generate your own dictionary from a list of txt dictionaries you
 # could otherwise run :
