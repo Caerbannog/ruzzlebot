@@ -9,6 +9,9 @@ import zipfile
 import os
 import time
 from socket import *
+import StringIO
+from PIL import Image
+
 
 # TODO http://www.pygtk.org/pygtk2tutorial/ch-GettingStarted.html
 # import pygtk
@@ -22,7 +25,7 @@ def ord_compat(x): # http://python3porting.com/problems.html#binary-data-in-pyth
         return x
 
 
-def adb_command(cmd): # https://github.com/rbrady/python-adb/blob/master/adb/utils.py
+def adb_command(cmd):
     return os.popen('adb %s' % cmd, 'r').read()
 
 
@@ -31,7 +34,7 @@ def open_dictionary(language):
     
     if not os.path.exists(dictionary_path):
         print('Downloading APK...')
-        apk_path = adb_command('pm path se.maginteractive.rumble.free').split(':')[1].strip()
+        apk_path = adb_command('shell pm path se.maginteractive.rumble.free').split(':')[1].strip()
         adb_command('pull %s ruzzle.apk' % apk_path)
         
         print('Extracting dictionary...')
@@ -43,6 +46,7 @@ def open_dictionary(language):
 
 def monkey_connect():
     port = 12345
+    adb_command('root')
     adb_command('forward tcp:%d tcp:%d' % (port, port))
     adb_command('shell monkey --port %d' % port)
 
@@ -71,6 +75,14 @@ def monkey_command(sock, cmd):
 
 def monkey_getvar(sock, var):
     return int(monkey_command(sock, 'getvar %s' % var))
+
+
+def get_screenshot():
+    png = adb_command('shell screencap -p')
+    png = png.replace('\r\n', '\n') # ADB inserts carriage returns.
+    
+    img = Image.open(StringIO.StringIO(png))
+    img.show()
 
 
 SCORES = { 'A':  1, 'B':  3, 'C':  3, 'D':  2, 'E':  1, 'F':  4, 'G':  2,
@@ -144,6 +156,9 @@ def type_solution(sock, screen_size, solution):
 
 
 def main():
+    print('Waiting for device...')
+    adb_command('wait-for-device')
+    
     f = open_dictionary('fr')
     print('Reading dictionary...')
     input_f = f.read()
@@ -160,19 +175,13 @@ def main():
             explore(board, input_f, 1, i, j, [], paths)
     print(' Found %d solutions' % len(paths))
     
-    
-    print('Waiting for device...')
-    adb_command('wait-for-device')
-    
     print('Launching monkey...')
-    # TODO MonkeyRunner.waitForConnection()
     sock = monkey_connect()
     screen_size = (monkey_getvar(sock, 'display.width'),
                    monkey_getvar(sock, 'display.height'))
     
-# TODO   pic = device.takeSnapshot()
-#        pic.writeToFile('screenshot.png','png')
-
+# TODO get_screenshot():
+    
     print('Sorting...')
     solutions = []
     for path in paths:
@@ -188,14 +197,14 @@ def main():
     for solution in solutions:
         if solution.word in words:
             continue # Skip duplicates.
-
+        
         words.add(solution.word)
         
         sys.stdout.write(' ' + solution.word)
         sys.stdout.flush()
         type_solution(sock, screen_size, solution)
     print('\nDone.')
-    
+
 
 if __name__ == '__main__':
     main()
