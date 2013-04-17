@@ -8,15 +8,10 @@ import re
 import zipfile
 import os
 import time
-from socket import *
 import StringIO
+from socket import *
 from PIL import Image
 
-
-# TODO http://www.pygtk.org/pygtk2tutorial/ch-GettingStarted.html
-# import pygtk
-# pygtk.require('2.0')
-# import gtk
 
 def ord_compat(x): # http://python3porting.com/problems.html#binary-data-in-python-2-and-python-3
     if sys.version < '3':
@@ -81,8 +76,30 @@ def get_screenshot():
     png = adb_command('shell screencap -p')
     png = png.replace('\r\n', '\n') # ADB inserts carriage returns.
     
-    img = Image.open(StringIO.StringIO(png))
-    img.show()
+    return Image.open(StringIO.StringIO(png))
+
+
+def process_screen():
+    img = get_screenshot()
+    
+    red = img.split()[0]
+    red = red.point(lambda i: (i > 150) * 255) # Threshold on red channel.
+    
+    top = [img.size[0] / 8, img.size[1] / 4]
+    while red.getpixel(tuple(top)) == 0:
+        top[1] += 1 # Go down until reaching the first cell.
+    
+    unit = img.size[0] / 4 # Width of a cell.
+    corner = (top[0], top[1] + unit / 2) # Center of the first cell.
+    
+    bonuses = [[(1, 1)] * 4 for j in range(4)]
+    for i in range(4):
+        for j in range(4):
+            pixel = img.getpixel((corner[0] + (j - .5) * unit,
+                                  corner[1] + (i - .5) * unit))
+            # TODO
+    
+    return (unit, corner, bonuses)
 
 
 SCORES = { 'A':  1, 'B':  3, 'C':  3, 'D':  2, 'E':  1, 'F':  4, 'G':  2,
@@ -91,10 +108,10 @@ SCORES = { 'A':  1, 'B':  3, 'C':  3, 'D':  2, 'E':  1, 'F':  4, 'G':  2,
            'V':  5, 'W': 10, 'X': 10, 'Y': 10, 'Z': 10  };
 
 
-def get_board():
-    # TODO line = MonkeyRunner.input('What are the letters?', 'ABCD EFGH IJKL MNOP')
-    line = 'ABCD EFGH IJKL MNOP'
-    clean = re.findall('[A-Z]', line.upper())
+def input_board():
+    clean = []
+    while len(clean) < 16:
+        clean += re.findall('[A-Z]', raw_input().upper())
 
     return [[clean[i + j * 4] for i in range(4)] for j in range(4)]
 
@@ -134,15 +151,29 @@ def explore(board, input_f, index, i, j, current_path, paths):
 
 
 class Solution:
-    pass
+    def __init__(self, board, bonuses, path):
+        word = ''
+        score = 0
+        multi = 0
+        for (i, j) in path:
+            word += board[i][j]
+            score += bonuses[i][j][0] * SCORES[board[i][j]]
+            multi *= bonuses[i][j][1]
+        
+        self.path = path
+        self.word = word
+        self.score = score * multi
+        
+        if len(word) >= 5:
+            self.score += 5 * (len(word) - 4)
 
 
-def type_solution(sock, screen_size, solution):
+def type_solution(sock, unit, corner, solution):
     last_coords = False
-    solution.path = [(0, 0), (0, 3), (3, 3), (3, 0)]
+    
     for (i, j) in solution.path:
-        new_coords = (screen_size[0] / 8 * (2 * i + 1),
-                      screen_size[0] / 8 * (2 * j - 3) + screen_size[1] / 2)
+        new_coords = (corner[0] + j * unit,
+                      corner[1] + i * unit)
         
         if not last_coords:
             monkey_command(sock, 'touch down %d %d' % new_coords)
@@ -151,7 +182,7 @@ def type_solution(sock, screen_size, solution):
         
         last_coords = new_coords
     
-    time.sleep(1)
+    time.sleep(.3)
     monkey_command(sock, 'touch up %d %d' % last_coords)
 
 
@@ -161,36 +192,30 @@ def main():
     
     f = open_dictionary('fr')
     print('Reading dictionary...')
-    input_f = f.read()
-    input_f = input_f[8:] # Skip the header.
+    input_f = f.read()[8:] # Skip the header.
     f.close()
     
-    print('Getting board...')
-    board = get_board()
+    print('What are the letters?')
+    board = input_board()
     
     print('Exploring board...')
     paths = []
     for i in range(4):
         for j in range(4):
             explore(board, input_f, 1, i, j, [], paths)
-    print(' Found %d solutions' % len(paths))
+    print('=> Found %d solutions' % len(paths))
     
     print('Launching monkey...')
     sock = monkey_connect()
-    screen_size = (monkey_getvar(sock, 'display.width'),
-                   monkey_getvar(sock, 'display.height'))
     
-# TODO get_screenshot():
+    print('Processing screen...')
+    (unit, corner, bonuses) = process_screen()
     
     print('Sorting...')
     solutions = []
     for path in paths:
-        solution = Solution()
-        solution.path = path
-        solution.word = ''.join([board[i][j] for (i,j) in path])
-        solution.score = len(solution.word) #TODO
-        solutions.append(solution)
-    solutions = sorted(solutions, key=lambda sol: -sol.score)
+        solutions.append(Solution(board, bonuses, path))
+    solutions = sorted(solutions, key=lambda solution: -solution.score)
     
     print('Playing...')
     words = set()
@@ -201,8 +226,9 @@ def main():
         words.add(solution.word)
         
         sys.stdout.write(' ' + solution.word)
+        sys.stdout.write(' %d ' % solution.score)
         sys.stdout.flush()
-        type_solution(sock, screen_size, solution)
+        type_solution(sock, unit, corner, solution)
     print('\nDone.')
 
 
