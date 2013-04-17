@@ -11,6 +11,7 @@ import time
 import StringIO
 from socket import *
 from PIL import Image
+import ImageFilter
 
 
 def ord_compat(x): # http://python3porting.com/problems.html#binary-data-in-python-2-and-python-3
@@ -81,25 +82,52 @@ def get_screenshot():
 
 def process_screen():
     img = get_screenshot()
+    img = img.filter(ImageFilter.BLUR)
+    img = img.filter(ImageFilter.BLUR)
     
     red = img.split()[0]
     red = red.point(lambda i: (i > 150) * 255) # Threshold on red channel.
     
-    top = [img.size[0] / 8, img.size[1] / 4]
-    while red.getpixel(tuple(top)) == 0:
-        top[1] += 1 # Go down until reaching the first cell.
+    cell = img.size[0] / 4 # Estimated dimension.
+    try:
+        top  = [cell / 2, img.size[1] / 4]
+        while red.getpixel(tuple(top)) == 0:
+            top[1] += 1 # Move down until reaching the first cell.
+        
+        left = [0, top[1] + cell / 2]
+        while red.getpixel(tuple(left)) == 0:
+            left[0] += 1 # Move right.
+    except IndexError:
+        print("Error: Ruzzle is not running.")
+        sys.exit()
     
-    unit = img.size[0] / 4 # Width of a cell.
-    corner = (top[0], top[1] + unit / 2) # Center of the first cell.
-    
+    cell    = ((img.size[0] - left[0]) / 4,
+               cell)
+    corner  = (left[0] + cell[0] / 2, top[1] + cell[1] / 2) # Center of the first cell.
     bonuses = [[(1, 1)] * 4 for j in range(4)]
+
+    img2=img.load()
     for i in range(4):
         for j in range(4):
-            pixel = img.getpixel((corner[0] + (j - .5) * unit,
-                                  corner[1] + (i - .5) * unit))
-            # TODO
-    
-    return (unit, corner, bonuses)
+            # Typical values
+            # 236, 237, 236 None
+            # 55,  122, 180 TL
+            # 241, 199,  88 DW
+            # 228,  71,  71 TW
+            # 45,  169,  36 DL
+
+            pixel = img.getpixel((corner[0] + (j - .45) * cell[0],
+                                  corner[1] + (i - .45) * cell[1]))
+            
+            #~ if pixel[3] < 150:
+                #~ if pixel[]
+            #~ elif pixel[]: # TODO
+            
+            img2[corner[0] + (j - .45) * cell[0],
+                 corner[1] + (i - .45) * cell[1]] = (0, 0, 0)
+            print(pixel)
+    img.show()
+    return (cell, corner, bonuses)
 
 
 SCORES = { 'A':  1, 'B':  3, 'C':  3, 'D':  2, 'E':  1, 'F':  4, 'G':  2,
@@ -154,7 +182,7 @@ class Solution:
     def __init__(self, board, bonuses, path):
         word = ''
         score = 0
-        multi = 0
+        multi = 1
         for (i, j) in path:
             word += board[i][j]
             score += bonuses[i][j][0] * SCORES[board[i][j]]
@@ -168,12 +196,12 @@ class Solution:
             self.score += 5 * (len(word) - 4)
 
 
-def type_solution(sock, unit, corner, solution):
+def type_solution(sock, cell, corner, solution):
     last_coords = False
     
     for (i, j) in solution.path:
-        new_coords = (corner[0] + j * unit,
-                      corner[1] + i * unit)
+        new_coords = (corner[0] + j * cell[0],
+                      corner[1] + i * cell[1])
         
         if not last_coords:
             monkey_command(sock, 'touch down %d %d' % new_coords)
@@ -182,7 +210,7 @@ def type_solution(sock, unit, corner, solution):
         
         last_coords = new_coords
     
-    time.sleep(.3)
+    time.sleep(.15)
     monkey_command(sock, 'touch up %d %d' % last_coords)
 
 
@@ -209,7 +237,7 @@ def main():
     sock = monkey_connect()
     
     print('Processing screen...')
-    (unit, corner, bonuses) = process_screen()
+    (cell, corner, bonuses) = process_screen()
     
     print('Sorting...')
     solutions = []
@@ -228,7 +256,7 @@ def main():
         sys.stdout.write(' ' + solution.word)
         sys.stdout.write(' %d ' % solution.score)
         sys.stdout.flush()
-        type_solution(sock, unit, corner, solution)
+        type_solution(sock, cell, corner, solution)
     print('\nDone.')
 
 
